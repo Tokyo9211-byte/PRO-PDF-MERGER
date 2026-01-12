@@ -3,6 +3,7 @@ import FileSaver from 'file-saver';
 import { FileItem, MergeOptions, ProcessingStatus, WorkerMessage } from '../types';
 import { processImage } from '../utils/imageUtils';
 
+// Robust helper to get a working saveAs function
 const getSaveAs = (module: any) => {
   if (typeof module === 'function') return module;
   if (module && typeof module.saveAs === 'function') return module.saveAs;
@@ -34,7 +35,7 @@ self.onmessage = async (e) => {
       self.postMessage({
         type: 'PROGRESS',
         progress: (i / total) * 100,
-        message: "Processing " + (i + 1) + " of " + total + ": " + file.name
+        message: "Merging " + (i + 1) + " of " + total + ": " + file.name
       });
 
       try {
@@ -74,7 +75,7 @@ self.onmessage = async (e) => {
       }
     }
 
-    self.postMessage({ type: 'PROGRESS', progress: 99, message: 'Assembling Final PDF...' });
+    self.postMessage({ type: 'PROGRESS', progress: 99, message: 'Wrapping up final PDF...' });
     
     const pdfBytes = await mergedPdf.save({ 
       useObjectStreams: true,
@@ -82,6 +83,7 @@ self.onmessage = async (e) => {
     });
     
     const resultBuffer = pdfBytes.buffer;
+    // We send the Uint8Array back, and transfer the buffer for zero-copy performance
     self.postMessage({
       type: 'COMPLETED',
       data: pdfBytes
@@ -111,6 +113,37 @@ export const usePDFProcessor = () => {
   
   const workerRef = useRef<Worker | null>(null);
 
+  const triggerDownload = (data: Uint8Array) => {
+    try {
+      // Explicitly cast to any or BlobPart array to satisfy TS in restricted environments
+      const blobPart: any = data;
+      const finalBlob = new Blob([blobPart], { type: 'application/pdf' });
+      const filename = `ProPDF_Merged_${Date.now()}.pdf`;
+
+      if (saveAsFunc) {
+        saveAsFunc(finalBlob, filename);
+      } else {
+        // Ultimate fallback for automatic download
+        const url = URL.createObjectURL(finalBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        
+        // Cleanup
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 1000);
+      }
+    } catch (e) {
+      console.error("Download trigger failed:", e);
+      setStatus(s => ({ ...s, error: "Download failed. Please try again." }));
+    }
+  };
+
   const cancel = useCallback(() => {
     if (workerRef.current) {
       workerRef.current.terminate();
@@ -120,7 +153,7 @@ export const usePDFProcessor = () => {
   }, []);
 
   const process = useCallback(async (files: FileItem[], options: MergeOptions) => {
-    setStatus({ isProcessing: true, progress: 0, message: 'Starting process...' });
+    setStatus({ isProcessing: true, progress: 0, message: 'Initializing...' });
     const skippedFiles: string[] = [];
 
     try {
@@ -155,11 +188,11 @@ export const usePDFProcessor = () => {
         setStatus(s => ({ 
           ...s, 
           progress: ((i + chunk.length) / files.length) * 15, 
-          message: `Buffered ${Math.min(i + chunk.length, files.length)} of ${files.length} files...` 
+          message: `Readying ${Math.min(i + chunk.length, files.length)} of ${files.length} files...` 
         }));
       }
 
-      if (processedFilesData.length === 0) throw new Error('No valid files ready.');
+      if (processedFilesData.length === 0) throw new Error('No files found to process.');
 
       const blob = new Blob([WORKER_CODE], { type: 'application/javascript' });
       const workerUrl = URL.createObjectURL(blob);
@@ -175,36 +208,22 @@ export const usePDFProcessor = () => {
             setStatus(s => ({ 
               ...s, 
               progress: 15 + (msg.progress || 0) * 0.85, 
-              message: msg.message || 'Merging...' 
+              message: msg.message || 'Processing...' 
             }));
             break;
           case 'COMPLETED':
             if (msg.data) {
-              // msg.data is Uint8Array, we wrap it in a Blob
-              // Using any cast to prevent TS error about ArrayBufferLike during Vercel build
-              const finalBlob = new Blob([msg.data as any], { type: 'application/pdf' });
-              const filename = `ProPDF_Merged_${Date.now()}.pdf`;
-              
-              if (saveAsFunc) {
-                saveAsFunc(finalBlob, filename);
-              } else {
-                const url = URL.createObjectURL(finalBlob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+              triggerDownload(msg.data);
+              setStatus({ isProcessing: false, progress: 100, message: 'Finished!' });
+              if (skippedFiles.length > 0) {
+                alert(`Operation complete. Note: ${skippedFiles.length} files were corrupted and skipped.`);
               }
-              
-              setStatus({ isProcessing: false, progress: 100, message: 'Merge successful!' });
-              if (skippedFiles.length > 0) alert(`Success! (Note: ${skippedFiles.length} files were skipped due to errors)`);
             }
             URL.revokeObjectURL(workerUrl);
             worker.terminate();
             break;
           case 'ERROR':
-            setStatus({ isProcessing: false, progress: 0, message: 'Processing Error.', error: msg.error });
+            setStatus({ isProcessing: false, progress: 0, message: 'Error occurred.', error: msg.error });
             URL.revokeObjectURL(workerUrl);
             worker.terminate();
             break;
@@ -215,15 +234,16 @@ export const usePDFProcessor = () => {
       };
 
       worker.onerror = (e) => {
-        setStatus({ isProcessing: false, progress: 0, message: 'Engine crash.', error: e.message });
+        setStatus({ isProcessing: false, progress: 0, message: 'Worker error.', error: e.message });
         URL.revokeObjectURL(workerUrl);
       };
 
+      // Send the data and transfer the buffers
       worker.postMessage({ files: processedFilesData, options }, transferables);
 
     } catch (err: any) {
-      console.error("PDF Thread Error:", err);
-      setStatus({ isProcessing: false, progress: 0, message: 'Fatal Error.', error: err.message });
+      console.error("PDF Processing Thread Error:", err);
+      setStatus({ isProcessing: false, progress: 0, message: 'Fatal failure.', error: err.message });
     }
   }, []);
 
