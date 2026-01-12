@@ -1,4 +1,3 @@
-
 export type FileType = 'pdf' | 'image';
 
 export interface FileItem {
@@ -35,7 +34,7 @@ export interface WorkerMessage {
   type: 'PROGRESS' | 'COMPLETED' | 'ERROR' | 'WARNING';
   progress?: number;
   message?: string;
-  data?: Uint8Array;
+  data?: any; // Changed from Uint8Array to any to support ArrayBuffer transfers
   error?: string;
   fileName?: string;
 }
