@@ -8,6 +8,7 @@ import { processImage } from '../utils/imageUtils';
 const saveAs = (FileSaver as any).saveAs || (FileSaver as any).default?.saveAs || FileSaver;
 
 // The worker code is inlined to bypass origin-mismatch issues in sandboxed environments.
+// Using 'any' types inside the string to prevent environment-specific TS validation errors.
 const WORKER_CODE = `
 import { PDFDocument } from 'https://esm.sh/pdf-lib@^1.17.1';
 
@@ -33,7 +34,7 @@ self.onmessage = async (e) => {
             throwOnInvalidObject: true 
           });
           const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-          pages.forEach(page => mergedPdf.addPage(page));
+          pages.forEach((page) => mergedPdf.addPage(page));
         } else {
           // Handle Image (already converted to ArrayBuffer in main thread)
           let image;
@@ -60,10 +61,12 @@ self.onmessage = async (e) => {
     self.postMessage({ type: 'PROGRESS', progress: 95, message: 'Saving final document...' });
     const pdfBytes = await mergedPdf.save();
     
-    self.postMessage({
+    // Transferrable buffer for performance
+    const buffer = pdfBytes.buffer;
+    (self as any).postMessage({
       type: 'COMPLETED',
       data: pdfBytes
-    }, [pdfBytes.buffer]);
+    }, [buffer]);
 
   } catch (err) {
     self.postMessage({
@@ -150,7 +153,8 @@ export const usePDFProcessor = () => {
             break;
           case 'COMPLETED':
             if (msg.data) {
-              const blobData = new Blob([msg.data], { type: 'application/pdf' });
+              // Cast to any to bypass SharedArrayBuffer / BlobPart type mismatch in strict TS
+              const blobData = new Blob([msg.data as any], { type: 'application/pdf' });
               const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
               
               if (typeof saveAs === 'function') {
