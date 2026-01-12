@@ -31,7 +31,6 @@ self.onmessage = async (e) => {
     for (let i = 0; i < total; i++) {
       const file = files[i];
       
-      // Send progress update to UI
       self.postMessage({
         type: 'PROGRESS',
         progress: (i / total) * 100,
@@ -51,10 +50,8 @@ self.onmessage = async (e) => {
             mergedPdf.addPage(page);
           });
           
-          // Force free memory for the source document
           pdf.context.pagemap = null;
         } else {
-          // Images
           var image;
           if (file.type === 'image/jpeg') {
             image = await mergedPdf.embedJpg(file.data);
@@ -79,13 +76,11 @@ self.onmessage = async (e) => {
 
     self.postMessage({ type: 'PROGRESS', progress: 99, message: 'Assembling Final PDF...' });
     
-    // Final save with structural compression
     const pdfBytes = await mergedPdf.save({ 
       useObjectStreams: true,
       addDefaultFont: false
     });
     
-    // Hand back the result using Transferable objects (no memory cloning)
     const resultBuffer = pdfBytes.buffer;
     self.postMessage({
       type: 'COMPLETED',
@@ -100,6 +95,12 @@ self.onmessage = async (e) => {
   }
 };
 `;
+
+interface ProcessedFileData {
+  name: string;
+  type: string;
+  data: ArrayBuffer;
+}
 
 export const usePDFProcessor = () => {
   const [status, setStatus] = useState<ProcessingStatus>({
@@ -124,7 +125,7 @@ export const usePDFProcessor = () => {
 
     try {
       const CONCURRENCY = 15;
-      const processedFilesData = [];
+      const processedFilesData: ProcessedFileData[] = [];
       const transferables: ArrayBuffer[] = [];
       
       for (let i = 0; i < files.length; i += CONCURRENCY) {
@@ -179,7 +180,9 @@ export const usePDFProcessor = () => {
             break;
           case 'COMPLETED':
             if (msg.data) {
-              const finalBlob = new Blob([msg.data], { type: 'application/pdf' });
+              // msg.data is Uint8Array, we wrap it in a Blob
+              // Using any cast to prevent TS error about ArrayBufferLike during Vercel build
+              const finalBlob = new Blob([msg.data as any], { type: 'application/pdf' });
               const filename = `ProPDF_Merged_${Date.now()}.pdf`;
               
               if (saveAsFunc) {
