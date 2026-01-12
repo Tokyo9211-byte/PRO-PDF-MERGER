@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback } from 'react';
 import { useFileManager } from './hooks/useFileManager';
 import { usePDFProcessor } from './hooks/usePDFProcessor';
@@ -16,6 +15,8 @@ const App: React.FC = () => {
     removeFiles,
     clearAll,
     reorderFiles,
+    bulkReorder,
+    moveSelectedTo,
     toggleSelect,
     selectedCount,
     totalSize
@@ -62,6 +63,8 @@ const App: React.FC = () => {
               <ThumbnailGrid 
                 files={files} 
                 onReorder={reorderFiles} 
+                onBulkReorder={bulkReorder}
+                onMoveSelectedTo={moveSelectedTo}
                 onToggleSelect={toggleSelect}
                 onRemove={removeFiles}
               />
