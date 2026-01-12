@@ -1,0 +1,5 @@
+{
+  "name": "ProPDF Merger",
+  "description": "A production-ready, client-side PDF and Image merger with virtualized scrolling, quality controls, and privacy-first local processing.",
+  "requestFramePermissions": []
+}
